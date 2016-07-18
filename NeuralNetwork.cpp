@@ -17,6 +17,12 @@ public:
 	DimensionMismatchException() {}
 };
 
+template<typename T> class Matrix;
+template<typename T> class Network;
+
+template<typename T>
+std::ostream &operator<< (std::ostream& o, const Matrix<T>& mat);
+
 template<typename T>
 class Matrix {
 public:
@@ -32,7 +38,8 @@ public:
 		mempool_.reset();
 	}
 
-	Matrix(const Matrix<T> &mat, bool nodeep=false) 
+
+	Matrix(const Matrix<T>& mat, bool nodeep=false) 
 	: nrows_(0)
 	, ncols_(0)
 	, nodeep_(nodeep)
@@ -46,12 +53,8 @@ public:
 	Matrix<T>& operator=(const Matrix<T>& mat) {
 		nrows_ = mat.nrows();
 		ncols_ = mat.ncols();
-		if (nodeep_) {
-			mempool_ = mat.mempool_;
-		} else {
-			mempool_.reset(new T[mat.nrows() * mat.ncols() * sizeof(T)]);
-			memcpy(mempool_.get(), mat.mempool_.get(), mat.size());
-		}
+		mempool_.reset(new T[mat.nrows() * mat.ncols() * sizeof(T)]);
+		memcpy(mempool_.get(), mat.mempool_.get(), mat.size());
 		data_ = mempool_.get();
 		return *this;
 	}
@@ -70,21 +73,23 @@ public:
 	}
 
 	inline T& operator () (unsigned r, unsigned c) {
+#ifdef _DEBUG
+		if (r >= nrows_ || c >= ncols_)
+			throw DimensionMismatchException();
+#endif
 		return data_[r * ncols_ + c];
 	}
 
 	inline const T& operator () (unsigned r, unsigned c) const {
+#ifdef _DEBUG
+		if (r >= nrows_ || c >= ncols_)
+			throw DimensionMismatchException();
+#endif
 		return data_[r * ncols_ + c];
 	}
 
 	// tranposed.
 	Matrix<T> Tr() const {
-		if (nrows() == 1
-			&& nodeep_ == true) {
-			Matrix<T> t(*this, true /* nodeep */);
-			std::swap(t.nrows_, t.ncols_);
-			return t;
-		}
 		Matrix<T> t(ncols(), nrows());
 		for (unsigned r = 0; r < nrows(); ++r) {
 			for (unsigned c = 0; c < ncols(); ++c) {
@@ -95,31 +100,22 @@ public:
 	}
 
 	Matrix<T> row(unsigned r) const {
+#ifdef _DEBUG
 		if ( r >= nrows() )
 			throw DimensionMismatchException();
-		Matrix<T> rs(*this, true /* nodeep */);
-		rs.data_ = &(this->data_[r * ncols_]);
-		rs.nrows_ = 1;
-		return rs;
-	}
-
-#if 0
-	Matrix<T> rows(unsigned start, unsigned end) const {
-		if ( start > end 
-			 || start >= nrows()
-			 || end >= nrows() )
-			throw DimensionMismatchException();
-		Matrix<T> rs(end-start+1, ncols());
-		memcpy(rs.data_, data_ + start * ncols(), rs.size());
-		return rs;
-	}
 #endif
+		Matrix<T> rs(1, ncols());
+		memcpy(rs.data_, (const void *)(data_ + r * ncols_), sizeof(T)*ncols());
+		return rs;
+	}
 
-	Matrix<T> cols(unsigned start, unsigned end) {
+	Matrix<T> cols(unsigned start, unsigned end) const {
+#ifdef _DEBUG
 		if (start > end
 			|| start >= ncols()
 			|| end >= ncols())
 			throw DimensionMismatchException();
+#endif
 		Matrix<T> cl(nrows(), end - start + 1);
 		for (unsigned r = 0; r < cl.nrows(); ++r) {
 			for (unsigned c = 0; c < cl.ncols(); ++c) {
@@ -129,9 +125,11 @@ public:
 		return cl;
 	}
 
-	Matrix<T> operator+(const Matrix<T> &mat) {
+	Matrix<T> operator+(const Matrix<T> &mat) const {
+#ifdef _DEBUG
 		if (ncols() != mat.ncols() || nrows() < mat.nrows())
 			throw DimensionMismatchException();
+#endif
 		Matrix<T> added(nrows(), ncols());
 		for (unsigned r = 0; r < added.nrows(); ++r) {
 			for (unsigned c = 0; c < added.ncols(); ++c) {
@@ -142,8 +140,10 @@ public:
 	}
 
 	Matrix<T> &operator+=(const Matrix<T> &mat) {
+#ifdef _DEBUG
 		if (ncols() != mat.ncols() || nrows() != mat.nrows())
 			throw DimensionMismatchException();
+#endif
 		for (unsigned r = 0; r < nrows(); ++r) {
 			for (unsigned c = 0; c < ncols(); ++c) {
 				(*this)(r, c) += mat(r, c);
@@ -152,9 +152,11 @@ public:
 		return (*this);
 	}
 
-	Matrix<T> operator-(const Matrix<T> &mat) {
+	Matrix<T> operator-(const Matrix<T> &mat) const {
+#ifdef _DEBUG
 		if (ncols() != mat.ncols() || nrows() < mat.nrows())
 			throw DimensionMismatchException();
+#endif
 		Matrix<T> added(nrows(), ncols());
 		for (unsigned r = 0; r < added.nrows(); ++r) {
 			for (unsigned c = 0; c < added.ncols(); ++c) {
@@ -165,8 +167,10 @@ public:
 	}
 
 	Matrix<T> &operator-=(const Matrix<T> &mat) {
+#ifdef _DEBUG
 		if (ncols() != mat.ncols() || nrows() != mat.nrows())
 			throw DimensionMismatchException();
+#endif
 		for (unsigned r = 0; r < nrows(); ++r) {
 			for (unsigned c = 0; c < ncols(); ++c) {
 				(*this)(r, c) -= mat(r, c);
@@ -175,7 +179,7 @@ public:
 		return (*this);
 	}
 
-	Matrix<T> operator-(float m) {
+	Matrix<T> operator-(float m) const {
 		Matrix<T> added(nrows(), ncols());
 		for (unsigned r = 0; r < multed.nrows(); ++r) {
 			for (unsigned c = 0; c < multed.ncols(); ++c) {
@@ -185,9 +189,11 @@ public:
 		return added;
 	}
 
-	Matrix<T> operator*(const Matrix<T> &mat) {
+	Matrix<T> operator*(const Matrix<T> &mat) const {
+#ifdef _DEBUG
 		if (ncols() != mat.ncols() || nrows() != mat.nrows())
 			throw DimensionMismatchException();
+#endif
 		Matrix<T> multed(nrows(), ncols());
 		for (unsigned r = 0; r < multed.nrows(); ++r) {
 			for (unsigned c = 0; c < multed.ncols(); ++c) {
@@ -197,7 +203,7 @@ public:
 		return multed;
 	}
 
-	Matrix<T> operator*(float m) {
+	Matrix<T> operator*(float m) const {
 		Matrix<T> multed(nrows(), ncols());
 		for (unsigned r = 0; r < multed.nrows(); ++r) {
 			for (unsigned c = 0; c < multed.ncols(); ++c) {
@@ -217,10 +223,11 @@ public:
 	}
 
 
-	Matrix<T> dot(const Matrix<T> &mat) {
+	Matrix<T> dot(const Matrix<T> &mat) const {
+#ifdef _DEBUG
 		if (ncols() != mat.nrows())
 			throw DimensionMismatchException();
-
+#endif
 		Matrix<T> dotted(nrows(), mat.ncols());
 		for (unsigned r = 0; r < dotted.nrows(); ++r) {
 			for (unsigned c = 0; c < dotted.ncols(); ++c) {
@@ -256,7 +263,11 @@ public:
 	}
 
 	void zeros() {
-		memset(data_, 0x0, nrows()*ncols()*sizeof(T));
+		for (unsigned r = 0; r < nrows(); ++r) {
+			for (unsigned c = 0; c < ncols(); ++c) {
+				(*this)(r, c) = (T)0;
+			}
+		}
 	}
 
 	inline unsigned nrows() const { return nrows_;  }
@@ -269,21 +280,23 @@ public:
 			+ std::to_string(ncols());
 	}
 
-	void dump(const std::string &header) {
-		std::cout << header.c_str() << std::endl;
-		for (unsigned r = 0; r < ncols_; ++r) {
-			for (unsigned c = 0; c < nrows_; ++c) {
-				std::cout << std::setw(7) << std::setprecision(2) << (*this)(r, c);
-			}
-			std::cout << std::endl;
-		}
-		std::cout << std::endl;
-	}
+	friend std::ostream &operator<< <>(std::ostream& o, const Matrix<T>& mat);
+
 private:
 	Matrix() = delete;
 
+	void NodeepCopy(const Matrix<T>& mat) {
+		nrows_ = mat.nrows();
+		ncols_ = mat.ncols();
+		// FIXME:
+		nodeep_ = false;
+		mempool_ = mat.mempool_;
+		data_ = mat.data_;
+	}
+
 	//friend void Mnist::load_data(const std::string &path, Matrix<float> &img);
 	friend class Mnist;
+	template<typename T> friend class Network;
 
 	unsigned nrows_;
 	unsigned ncols_;
@@ -292,6 +305,17 @@ private:
 	// data_ points to a location in mempool_.
 	T* data_;
 };
+
+template<typename T>
+std::ostream &operator<< (std::ostream& o, const Matrix<T>& mat) {
+	for (unsigned r = 0; r < mat.nrows_; ++r) {
+		for (unsigned c = 0; c < mat.ncols_; ++c) {
+			o << std::setw(7) << std::setprecision(2) << mat(r, c);
+		}
+		o << std::endl;
+	}
+	return o << std::endl;
+}
 
 template<typename T>
 Matrix<T> operator*(float lhs, Matrix<T> &rhs) {
@@ -315,10 +339,10 @@ template<>
 void random(Matrix<float> &mat) {
 	std::random_device rd;
 	std::mt19937 mt(rd());
-	std::uniform_real_distribution<float> dist(0, 1.0);
+	std::uniform_real_distribution<float> dist(-0.5f, 0.5f);
 
-	for (unsigned r = 0; r < mat.nrows(); ++r) {
-		for (unsigned c = 0; c < mat.ncols(); ++c) {
+	for (unsigned c = 0; c < mat.ncols(); ++c) {
+		for (unsigned r = 0; r < mat.nrows(); ++r) {
 			mat(r, c) = dist(mt);
 		}
 	}
@@ -352,10 +376,9 @@ public:
 		for (auto i : sizes)
 			std::cout << i << " ";
 		std::cout << std::endl;
-
+		// first one is dummy
 		for (std::vector<unsigned>::iterator y = sizes_.begin(); y != sizes_.end(); ++y) {
 			Matrix<float> mat(*y, 1);
-			random(mat);
 			biases_.push_back(mat);
 			std::cout << "biases=" << 1 << "x" << *y << std::endl;
 		}
@@ -365,22 +388,47 @@ public:
 			weights_.push_back(mat);
 		}
 		for (std::vector<unsigned>::iterator y = sizes_.begin() + 1; y != sizes_.end(); ++y) {
-			Matrix<float> mat(*y, *(y-1));
-			random(mat);
+			Matrix<float> mat(*y, *(y - 1));
 			weights_.push_back(mat);
-			std::cout << "weights=" << *(y-1) << "x" << *y << std::endl;
+			std::cout << "weights=" << *(y - 1) << "x" << *y << std::endl;
 		}
+
+		initRandom();
+		//initFromSaved();
+	}
+
+	void initRandom() {
+		random(weights_[1]);
+		random(weights_[2]);
+		random(biases_[1]);
+		random(biases_[2]);
+	}
+
+	void initFromSaved() {
+		load_data("c:/temp/w0.npy", weights_[1]);
+		load_data("c:/temp/w1.npy", weights_[2]);
+		load_data("c:/temp/b0.npy", biases_[1]);
+		load_data("c:/temp/b1.npy", biases_[2]);
+	}
+
+	void load_data(const std::string &path, Matrix<float> &img) {
+		std::ifstream ifs(path, std::ifstream::in | std::ifstream::binary);
+		unsigned sz = img.nrows() * img.ncols() * sizeof(float);
+		ifs.seekg(0x50);
+		ifs.read((char *)img.data_, sz);
+		ifs.close();
 	}
 
 	virtual ~Network(){
 	}
-
 
 	void SGD(Matrix<T> &training_data, Matrix<T> &labels, 
 		unsigned epochs, unsigned mini_batch_size, float eta) {
 		unsigned n = training_data.nrows();
 		std::srand(unsigned(std::time(0)));
 		std::vector<unsigned> index(n);
+		for (unsigned i = 0; i < n; ++i)
+			index[i] = i;
 		for (unsigned e = 0; e < epochs; ++e) {
 			std::random_shuffle(index.begin(), index.end());
 			// training_data
@@ -401,6 +449,8 @@ public:
 		for (unsigned i = 0; i < mb_size; ++i) {
 			std::pair<std::vector<Matrix<T>>, std::vector<Matrix<T>>> delta_nabla =
 				backprop(mb_x.row(index[k+i]), mb_y.row(index[k+i]));
+			//std::cout << index[k + i] << " ";
+			//backprop(mb_x.row(k + i), mb_y.row(k + i));
 			for (unsigned j = 1; j < weights_.size(); ++j) {
 				nabla_b[j] += delta_nabla.first[j];
 				nabla_w[j] += delta_nabla.second[j];
@@ -408,10 +458,11 @@ public:
 			float learning_rate = (eta / mb_size);
 			// skip input layer
 			for (unsigned j = 1; j < weights_.size(); ++j) {
-				weights_[j] -= (nabla_w[j] * learning_rate);
 				biases_[j] -= (nabla_b[j] * learning_rate);
+				weights_[j] -= (nabla_w[j] * learning_rate);
 			}
 		}
+		//std::cout << std::endl;
 	}
 
 	// Return a tuple (nabla_b, nabla_w) representing the
@@ -419,7 +470,7 @@ public:
 	// *nabla_w* are layer - by -layer lists of Matrix,
 	// similar to biases_ and weights_.
 	std::pair<std::vector<Matrix<T>>, std::vector<Matrix<T>>> 
-		backprop(const Matrix<T>& feature, const Matrix<T>& label) {
+	backprop(const Matrix<T>& feature, const Matrix<T>& label) {
 		std::vector<Matrix<T>> nabla_b = zeros(biases_);
 		std::vector<Matrix<T>> nabla_w = zeros(weights_);
 		//
@@ -432,7 +483,7 @@ public:
 		// store all z vectors
 		// z = w.a + b
 		std::vector<Matrix<T>> zs;
-		zs.push_back(feature);
+		zs.push_back(activation);
 		for (unsigned i = 1; i < weights_.size(); ++i) {
 			Matrix<T> z = weights_[i].dot(activation) + biases_[i];
 			zs.push_back(z);
@@ -443,8 +494,12 @@ public:
 		// backward
 		//
 
+		Matrix<T> y = label.Tr();
 		// output layer, L
-		Matrix<T> delta = cost_derivative(activations.back(), label) * sigmoid_prime(zs.back());
+		Matrix<T> cost = cost_derivative(activations.back(), y);
+		Matrix<T> lastZ = zs.back();
+		Matrix<T> sprime = sigmoid_prime(lastZ);
+		Matrix<T> delta = cost * sprime;
 		nabla_b.back() = delta;
 		nabla_w.back() = delta.dot(activations[activations.size() - 2].Tr());
 		// hidden layers
@@ -452,7 +507,7 @@ public:
 		for (size_t layer = sizes_.size() - 2; layer > 0; --layer) {
 			Matrix<T> z = zs[layer];
 			Matrix<T> sp = sigmoid_prime(z);
-			delta = sp * weights_[layer + 1].Tr().dot(delta);
+			delta = weights_[layer + 1].Tr().dot(delta) * sp;
 			nabla_b[layer] = delta;
 			nabla_w[layer] = delta.dot(activations[layer - 1].Tr());
 		}
@@ -464,13 +519,36 @@ public:
 		for (unsigned r = 0; r < testImages.nrows(); ++r) {
 			Matrix<T> row = testImages.row(r);
 			Matrix<T> testPredicted = feedForward(row);
-			sum += testPredicted.matchcount(testLabels);
+			unsigned p = argmax(testPredicted);
+			unsigned y = argmax(testLabels.row(r));
+			sum += ((p == y) ? 1 : 0);
 		}
-		return sum / float(testImages.nrows()*testLabels.nrows());
+		return sum / float(testImages.nrows());
+	}
+
+	void dump() {
+		std::cout << "network" << std::endl;
+		std::cout << "weights[2]=" << weights_[2] << std::endl;
+		std::cout << "biases[2]=" << biases_[2] << std::endl;
 	}
 
 private:
 	Network() = delete;
+
+	int argmax(const Matrix<T> &vec) {
+		assert(vec.ncols() == 1 || vec.nrows()==1);
+		unsigned max_i = 0;
+		unsigned sz = std::max(vec.ncols(), vec.nrows());
+		T max_v = vec(0, 0);
+		for (unsigned c = 0; c < sz; ++c) {
+			T val = vec.nrows() == 1 ? vec(0, c) : vec(c, 0);
+			if (val > max_v) {
+				max_v = val;
+				max_i = c;
+			}
+		}
+		return max_i;
+	}
 
 	Matrix<T> feedForward(const Matrix<T> &input) {
 		assert(input.nrows() == 1);
@@ -478,49 +556,48 @@ private:
 		size_t len = weights_.size();
 		// skip input layer
 		for (size_t idx = 1; idx < len; ++idx) {
-#if 0
-			std::cout << weights_[idx].shape()
-				<< ".dot("
-				<< features.shape()
-				<< ") + "
-				<< biases_[idx].shape()
-				<< std::endl;
-#endif
-			features = weights_[idx].dot(features) + biases_[idx];
+			features = sigmoid(weights_[idx].dot(features) + biases_[idx]);
 		}
-
-		for (unsigned r = 0; r < features.nrows(); ++r) {
-			for (unsigned c = 0; c < features.ncols(); ++c) {
-				features(r, c) = (T)sigmoid(features(r, c));
-			}
-		}
-		//std::cout << "feedForward:" << features.shape() << std::endl;
 		return features;
 	}
 
 	Matrix<T> sigmoid(Matrix<T> &mat) const {
+		Matrix<T> ret(mat);
 		for (unsigned r = 0; r < mat.nrows(); ++r) {
 			for (unsigned c = 0; c < mat.ncols(); ++c) {
-				mat(r, c) = (T)sigmoid(mat(r, c));
+				ret(r, c) = (T)sigmoid(mat(r, c));
 			}
 		}
-		return mat;
+		return ret;
 	}
 
 	inline float sigmoid(float z) const {
-		return float(1.0 / (1.0 + exp(-1.0*z)));
+		float a = float(1.0 / (1.0 + exp(-1.0*z)));
+#ifdef _DEBUG
+		if (a > 1.0f || a < 0.0f) {
+			std::abort();
+		}
+#endif
+		return a;
 	}
 
 	inline float sigmoid_prime(float z) const {
-		return sigmoid(z) * (1.0 - sigmoid(z));
+		float sig_z = sigmoid(z);
+		float prime_sig = sig_z * (1.0f - sig_z);
+#ifdef _DEBUG
+		if (prime_sig > 1.0f || prime_sig < 0.0f)
+			std::abort();
+#endif
+		return prime_sig;
 	}
 
 	Matrix<T> sigmoid_prime(Matrix<T> &mat) const {
 		Matrix<T> prime(mat);
 		for (unsigned r = 0; r < mat.nrows(); ++r) {
 			for (unsigned c = 0; c < mat.ncols(); ++c) {
-				float z = mat(r, c);
-				mat(r, c) = sigmoid(z) * (1.0f - sigmoid(z));
+				float z = prime(r, c);
+				float prime_sig = sigmoid_prime(z);
+				prime(r, c) = prime_sig;
 			}
 		}
 		return prime;
@@ -532,21 +609,13 @@ private:
 
 	std::vector<Matrix<float>> zeros(std::vector<Matrix<float>>& input) {
 		std::vector<Matrix<float>> zs;
-		for (auto i : input) zs.push_back(i);
-		for (auto z : zs) z.zeros();
+		for (auto i : input) {
+			Matrix<float> a(i);
+			a.zeros();
+			zs.push_back(a);
+		}
 		return zs;
 	}
-
-#if 0
-	std::vector<Matrix<float>> sums(std::vector<Matrix<float>>& x, std::vector<Matrix<float>>& y) {
-		assert(x.size() == y.size());
-		std::vector<Matrix<float>> s;
-		for (unsigned i = 1; i < x.size(); ++i) {
-			s.push_back(x[i] + y[i]);
-		}
-		return s;
-	}
-#endif
 
 	std::vector<unsigned> sizes_;
 	std::vector<Matrix<float>> biases_;
@@ -561,9 +630,9 @@ class Mnist {
 public:
 	Mnist() throw()
 		: trainImages_(60000, 28*28) 
-		, trainLabels_(60000, 1)
-		, testImages_(10000, 28 * 28)
-		, testLabels_(10000, 1)
+		, trainLabels_(60000, 10)
+		, testImages_(10000, 28*28)
+		, testLabels_(10000, 10)
 	{
 		load_data(train_images, trainImages_);
 		load_data(train_labels, trainLabels_);
@@ -581,16 +650,44 @@ public:
 private:
 	void load_data(const std::string &path, Matrix<float> &img) {
 		std::ifstream ifs(path, std::ifstream::in | std::ifstream::binary);
-		if (path.compare(train_images)==0 || path.compare(test_images)==0)
-			ifs.seekg(16);
-		else if (path.compare(train_labels)==0 || path.compare(test_labels)==0)
-			ifs.seekg(8);
+		bool bImage = false;
+		if (path.compare(train_images) == 0 || path.compare(test_images) == 0)
+			bImage = true;
 		unsigned sz = img.nrows()*img.ncols();
+		if (bImage)
+			ifs.seekg(16);
+		else {
+			ifs.seekg(8);
+			sz = img.nrows();
+		}
 		std::unique_ptr<unsigned char []> data(new unsigned char [sz]);
-		ifs.read((char *)data.get(), img.nrows()*img.ncols());
+		ifs.read((char *)data.get(), sz);
 		ifs.close();
+		if (bImage)
+			load_img(img, sz, data.get());
+		else
+			load_label(img, sz, data.get());
+	}
+
+	void load_img(Matrix<float> &img, unsigned sz, unsigned char *data) {
 		for (unsigned i = 0; i < sz; ++i)
-			img.data_[i] = float(data[i]);
+			img.data_[i] = float(data[i])/256.f;
+	}
+
+	void load_label(Matrix<float> &label, unsigned sz, unsigned char *data) {
+		for (unsigned i = 0; i < sz; ++i) {
+			label.data_[i * 10 + 0] = 0.0f;
+			label.data_[i * 10 + 1] = 0.0f;
+			label.data_[i * 10 + 2] = 0.0f;
+			label.data_[i * 10 + 3] = 0.0f;
+			label.data_[i * 10 + 4] = 0.0f;
+			label.data_[i * 10 + 5] = 0.0f;
+			label.data_[i * 10 + 6] = 0.0f;
+			label.data_[i * 10 + 7] = 0.0f;
+			label.data_[i * 10 + 8] = 0.0f;
+			label.data_[i * 10 + 9] = 0.0f;
+			label.data_[i * 10 + data[i]] = 1.0f;
+		}
 	}
 
 	//
@@ -648,54 +745,81 @@ private:
 	Matrix<float> testLabels_;
 };
 
-#include <initializer_list>
-
-int main()
+void unittest(const Matrix<float>& trainImages)
 {
 	Matrix<float> m1(3, 3);
 	Matrix<float> m2(3, 3);
-
 	random(m1);
 	random(m2);
-
-	m1.dump("m1");
-	m2.dump("m2");
-
+	std::cout << "m1" << std::endl << m1;
+	std::cout << "m2" << std::endl << m2;
 	Matrix<float> m3 = m1.dot(m2);
-	m3.dump("m3");
-
+	std::cout << "m3" << std::endl << m3;
 	Matrix<float> m4 = m1 + m2;
-	m4.dump("m4");
-
+	std::cout << "m4" << std::endl << m4;
 	Matrix<float> m5 = m1 * 1.0;
-	m5.dump("m5");
-
+	std::cout << "m5" << std::endl << m5;
 	Matrix<float> m6 = m1 * 2.0;
-	m6.dump("m6");
+	std::cout << "m6" << std::endl << m6;
 
-	Mnist nist;
-	Matrix<float> mm1(28*28, 1);
+	Matrix<float> mm1(28 * 28, 1);
 	random(mm1);
-
 	Matrix<float> mm2
-		= nist.trainImages().dot(mm1);
-
-	std::cout << "trainImage=" << nist.trainImages().shape() << std::endl;
+		= trainImages.dot(mm1);
 	std::cout << "mm1=" << mm1.shape() << std::endl;
 	std::cout << "mm2=" << mm2.shape() << std::endl;
 
-	std::vector<unsigned> sizes({ nist.imgSize(), 30, 10 });
+#if 1
+	for (unsigned r = 0; r < trainImages.nrows(); ++r) {
+		Matrix<float> row = trainImages.row(r);
+		for (unsigned c = 0; c < trainImages.ncols(); ++c) {
+			if (trainImages(r, c) != row(0, c)) {
+				std::cout << "Mismatch found:"
+					<< r << "," << c << std::endl;
+			}
+		}
+	}
+#endif
+}
 
+int main(int argc, char *argv[])
+{
+	{
+		class Foo {
+		public:
+			Foo() { std::cout << "Foo() :" << this << std::endl; }
+			~Foo() { std::cout << "~Foo() :" << this << std::endl; }
+		};
+		std::shared_ptr<Foo> p = std::make_shared<Foo>();
+		{
+			std::weak_ptr<Foo> w = p;
+		}
+	}
+
+	Mnist nist;
+	std::vector<unsigned> sizes({ nist.imgSize(), 30, 10 });
 	std::unique_ptr<Network<float>> network 
 		= std::make_unique<Network<float>>(sizes);
 
 	std::cout << "trainImages = " << nist.trainImages().shape() << std::endl;
 
+	unittest(nist.trainImages());
+
+#if 1
 	const unsigned epoch = 30;
 	const unsigned mini_batch_size = 10;
 	const float eta = 3.0f;
-	
+
+	std::cout << "BEFORE:" << std::endl;
+	network->dump();
+	std::cout << "---------------------------------" << std::endl;
+
 	network->SGD(nist.trainImages(), nist.trainLabels(), epoch, mini_batch_size, eta);
+
+	std::cout << "AFTER:" << std::endl;
+	network->dump();
+	std::cout << "---------------------------------" << std::endl;
+#endif
 
 	std::cout << "testImages = " << nist.testImages().shape() << std::endl;
 	std::cout << std::endl;
@@ -703,9 +827,8 @@ int main()
 	float score = 
 		network->evaluate(nist.testImages(), nist.testLabels());
 
-	std::cout << "Score = " << std::setprecision(2) << score*100. << "%" << std::endl;
+	std::cout << "Score = " << std::setprecision(2) << score*100.f << "%" << std::endl;
 	std::cout << std::endl;
 
 	return 0;
 }
-
