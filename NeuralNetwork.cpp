@@ -5,8 +5,11 @@
 
 #include<algorithm>
 #include<cassert>
+#include<chrono>
 #include<cmath>
+#include<ctime>
 #include<fstream>
+#include<future>
 #include<iomanip>
 #include<iostream>
 #include<list>
@@ -15,7 +18,24 @@
 #include<string>
 #include<vector>
 
-// TODO: Implement Copy-on-Write.
+class StopWatch {
+public:
+
+	StopWatch() 
+		: start_( std::chrono::system_clock::now() ) {
+	}
+
+	 double elapsed() {
+		std::chrono::time_point<std::chrono::system_clock> cur =
+			std::chrono::system_clock::now();
+		std::chrono::duration<double> elapsed_sec = cur - start_;
+		start_ = cur;
+		return elapsed_sec.count();
+	}
+
+private:
+	std::chrono::time_point<std::chrono::system_clock> start_;
+};
 
 class DimensionMismatchException : public std::exception
 {
@@ -68,14 +88,9 @@ public:
 		if (this != &mat) {
 			nrows_ = mat.nrows();
 			ncols_ = mat.ncols();
-			if (copyonwrite_) {
-				mempool_ = mat.mempool_;
-				data_ = mat.data_;
-			} else {
-				mempool_.reset(new T[mat.nrows() * mat.ncols() * sizeof(T)]);
-				memcpy(mempool_.get(), mat.mempool_.get(), mat.size());
-				data_ = mempool_.get();
-			}
+			mempool_ = mat.mempool_;
+			data_ = mat.data_;
+			copyonwrite_ = true;
 		}
 		return *this;
 	}
@@ -89,6 +104,7 @@ public:
 			data_ = mat.data_;
 			mat.mempool_.reset();
 			mat.data_ = nullptr;
+			copyonwrite_ = false;
 		}
 		return *this;
 	}
@@ -98,6 +114,7 @@ public:
 		if (r >= nrows_ || c >= ncols_)
 			throw DimensionMismatchException();
 #endif
+		copy();
 		return data_[r * ncols_ + c];
 	}
 
@@ -109,9 +126,9 @@ public:
 		return data_[r * ncols_ + c];
 	}
 
-	inline T* begin() { return &(*this)(0, 0); }
+	inline T* begin() { copy();  return &(*this)(0, 0); }
 	inline const T* begin() const { return &(*this)(0, 0); }
-	inline T* end() { return &(*this)(nrows() - 1, ncols() - 1) + 1; }
+	inline T* end() { copy();  return &(*this)(nrows() - 1, ncols() - 1) + 1; }
 	inline const T* end() const { return &(*this)(nrows() - 1, ncols() - 1) + 1; }
 	inline const T* data() const { return &(*this)(0, 0); }
 
@@ -171,6 +188,7 @@ public:
 		if (ncols() != mat.ncols() || nrows() != mat.nrows())
 			throw DimensionMismatchException();
 #endif
+		copy();
 		T* p = const_cast<Matrix<float> &>(mat).begin();
 		for (auto& e : *this) e += *p++; 
 		return (*this);
@@ -196,12 +214,14 @@ public:
 		if (ncols() != mat.ncols() || nrows() != mat.nrows())
 			throw DimensionMismatchException();
 #endif
+		copy();
 		T* p = const_cast<Matrix<float> &>(mat).begin();
 		for (auto& e : *this) e -= (*p++);
 		return (*this);
 	}
 
 	Matrix<T> &operator-=(float m) {
+		copy();
 		for (auto& e : *this) e -= m;
 		return (*this);
 	}
@@ -230,8 +250,15 @@ public:
 	}
 
 	Matrix<T> &operator*=(float m) {
+		copy();
 		for (auto& e : *this) e *= m;
 		return (*this);
+	}
+
+	inline Matrix<T> operator/(float m) const {
+		Matrix<T> multed(*this);
+		for (auto& e : multed) e /= m;
+		return multed;
 	}
 
 	Matrix<T> dot(const Matrix<T> &mat) const {
@@ -253,6 +280,7 @@ public:
 	}
 
 	inline Matrix<T> &zeros() {
+		copy();
 		for (auto& e : *this) e = (T) 0;
 		return *this;
 	}
@@ -270,6 +298,7 @@ public:
 	friend std::ostream &operator<< <>(std::ostream& o, const Matrix<T>& mat);
 
 	void load(const std::string &path) {
+		copy();
 		std::ifstream ifs(path, std::ifstream::in | std::ifstream::binary);
 		unsigned sz = nrows() * ncols() * sizeof(T);
 		ifs.seekg(0x50);
@@ -397,7 +426,8 @@ public:
 		: sizes_(sizes)
 		, biases_()
 		, weights_()
-		, cost_(std::make_unique<CrossEntropyCost<T>>()) {
+		, cost_(std::make_unique<CrossEntropyCost<T>>())
+		, stop_watch_() {
 		std::cout << "sizes: ";
 		for (auto i : sizes)
 			std::cout << i << " ";
@@ -467,22 +497,42 @@ public:
 		unsigned n = training_data.nrows();
 		std::srand(unsigned(std::time(0)));
 		std::vector<unsigned> index(n);
+		double elapsed = 0;
 		for (unsigned i = 0; i < n; ++i)
 			index[i] = i;
+		int max_score = 0;
+		int max_score_count = 0;
 		for (unsigned e = 0; e < epochs; ++e) {
 			std::random_shuffle(index.begin(), index.end());
 			// training_data
+			stop_watch_.elapsed();
 			for (unsigned k = 0; k < n; k += mini_batch_size) {
 				unsigned mb_size = (n - k) > mini_batch_size ? mini_batch_size : (n - k);
 				update_mini_batch(training_data, labels, index, k, mb_size, eta, lmbda, float(n));
 			}
-			std::cout << "epoch: " << e << std::endl;
-			std::cout << "Training score=" << evaluate(training_data, labels)
-				<< "/" << training_data.nrows()
-				<< std::endl;
-			std::cout << "Test score=" << evaluate(test_data, test_label) 
-					<< "/" << test_data.nrows() 
-					<< std::endl;
+			elapsed = stop_watch_.elapsed();
+			std::cout << "epoch: " << e << ", eta: " << eta << ", lambda: " << lmbda << std::endl;
+			int training_score = evaluate(training_data, labels);
+			int test_score = evaluate(test_data, test_label);
+			if (test_score > max_score) {
+				max_score = test_score;
+				max_score_count = 0;
+			} else {
+				++max_score_count;
+				if (max_score_count > 10) {
+					// decay learning rate
+					eta *= 0.5f;
+					lmbda *= 1.5f;
+					max_score_count = 0;
+					max_score = 0;
+				}
+			}
+			double elapsed2 = stop_watch_.elapsed();
+			std::cout << "Training took " << std::setprecision(5) << elapsed 
+				<< " seconds, score=" << training_score
+				<< "/" << training_data.nrows()	<< std::endl;
+			std::cout << "Test scoring took " << elapsed2 << " seconds, score=" << test_score
+					<< "/" << test_data.nrows()	<< std::endl;
 		}
 	}
 
@@ -492,26 +542,29 @@ public:
 		unsigned mb_size, float eta, float lmbda, float n) const {
 		std::vector<Matrix<T>> nabla_b = zeros(biases_);
 		std::vector<Matrix<T>> nabla_w = zeros(weights_);
+
+		typedef std::pair<std::vector<Matrix<T>>, std::vector<Matrix<T>>> d_nabla;
+		std::vector<std::future<d_nabla>> futures;
 		for (unsigned i = 0; i < mb_size; ++i) {
-			std::pair<std::vector<Matrix<T>>, std::vector<Matrix<T>>> delta_nabla =
-				backprop(mb_x.row(index[k+i]), mb_y.row(index[k+i]));
+			auto f = std::async(std::launch::async, 
+				&Network<T>::backprop, this, mb_x.row(index[k + i]), mb_y.row(index[k + i]));
+			futures.push_back(std::move(f));
+		}
+		for (int i = 0; i < futures.size(); ++i) {
+			d_nabla delta_nabla =
+				futures[i].get();
 			for (unsigned j = 1; j < weights_.size(); ++j) {
 				nabla_b[j] += delta_nabla.first[j];
 				nabla_w[j] += delta_nabla.second[j];
 			}
-			float learning_rate = (eta / mb_size);
+		}
 
-			//self.weights = [(1 - eta*(lmbda / n))*w - (eta / len(mini_batch))*nw
-			//	for w, nw in zip(self.weights, nabla_w)]
-			//self.biases = [b - (eta / len(mini_batch))*nb
-			//		for b, nb in zip(self.biases, nabla_b)]
-
-			// skip input layer
-			for (unsigned j = 1; j < weights_.size(); ++j) {
-				const_cast<Matrix<T>&>(biases_[j]) -= (learning_rate * nabla_b[j]);
-				Matrix<T>& w  = const_cast<Matrix<T>&>(weights_[j]);
-				w = (1.0f - eta * (lmbda / n))*w - (learning_rate * nabla_w[j]);
-			}
+		const float learning_rate = (eta / mb_size);
+		// skip input layer
+		for (unsigned j = 1; j < weights_.size(); ++j) {
+			const_cast<Matrix<T>&>(biases_[j]) -= (learning_rate * nabla_b[j]);
+			Matrix<T>& w = const_cast<Matrix<T>&>(weights_[j]);
+			w = (1.0f - eta * (lmbda / n))*w - (learning_rate * nabla_w[j]);
 		}
 	}
 
@@ -559,14 +612,34 @@ public:
 		return std::make_pair(nabla_b, nabla_w);
 	}
 
-	int evaluate(const Matrix<T> &testImages, const Matrix<T> &testLabels) {
+	int eval(const Matrix<T> &testImages, const Matrix<T> &testLabels, int start, int end) {
 		int sum = 0;
-		for (unsigned r = 0; r < testImages.nrows(); ++r) {
+		for (int r = start; r < end; ++r) {
 			Matrix<T> row = testImages.row(r);
 			Matrix<T> testPredicted = feedForward(row);
 			unsigned p = argmax(testPredicted);
 			unsigned y = argmax(testLabels.row(r));
 			sum += ((p == y) ? 1 : 0);
+		}
+		return sum;
+	}
+
+	int evaluate(const Matrix<T> &testImages, const Matrix<T> &testLabels) {
+		const int parallel = 8;
+		int num_rows = testImages.nrows() / parallel;
+		std::vector<std::future<int>> futures;
+		for (int r = 0; r < int(testImages.nrows()); r += num_rows) {
+			if ((r + num_rows - 1) > int(testImages.nrows())) {
+				num_rows = testImages.nrows() - r - 1;
+			}
+			auto f = std::async(std::launch::async,
+				&Network<T>::eval, this, testImages, testLabels, r, r + num_rows);
+			futures.push_back(std::move(f));
+		}
+		int sum = 0;
+		for (int i = 0; i < futures.size(); ++i) {
+			int s =	futures[i].get();
+			sum += s;
 		}
 		return sum;
 	}
@@ -621,6 +694,7 @@ private:
 	std::vector<Matrix<T>> biases_;
 	std::vector<Matrix<T>> weights_;
 	std::unique_ptr<Cost<T>> cost_;
+	StopWatch stop_watch_;
 };
 
 class Mnist {
@@ -668,8 +742,10 @@ private:
 
 	void load_img(Matrix<float> &img, unsigned sz, unsigned char *data) {
 		float *idata = &img(0, 0);
-		for (unsigned i = 0; i < sz; ++i)
-			idata[i] = float(data[i])/256.f;
+		float sum = 0;
+		for (unsigned i = 0; i < sz; ++i) {
+			idata[i] = float(data[i]) / 256.f;
+		}
 	}
 
 	void load_label(Matrix<float> &label, unsigned sz, unsigned char *data) {
@@ -746,17 +822,29 @@ private:
 
 #include "unittest.inc"
 
+
+void write_message(const std::string& message) {
+	std::cout << message << std::endl;
+}
+
 int main(int argc, char *argv[])
 {
+#if 0
+	auto f = std::async(write_message, "hello world from std::async\n");
+	write_message("hello world from main\n");
+	f.wait();
+
+	std::cout << "EOT" << std::endl;
+#else
 	Mnist nist;
-	std::vector<unsigned> sizes({ nist.imgSize(), 30, 10 });
+	std::vector<unsigned> sizes({ nist.imgSize(), 40, 10 });
 	std::unique_ptr<Network<float>> network 
 		= std::make_unique<Network<float>>(sizes);
 
 	unsigned epoch = 30;
 	const unsigned mini_batch_size = 10;
-	float eta = 1.0f;
-	float lmbda = 1.0f;
+	float eta = 0.1f;
+	float lmbda = 0.1f;
 
 	if (argc > 1) {
 		epoch = atoi(argv[1]);
@@ -777,6 +865,7 @@ int main(int argc, char *argv[])
 			eta, 
 			lmbda,
 			nist.testImages(), nist.testLabels());
+#endif
 
 	return 0;
 }
