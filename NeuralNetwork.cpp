@@ -1,5 +1,5 @@
 // NeuralNetwork.cpp : Defines the entry point for the console application.
-//
+// python source: http://neuralnetworksanddeeplearning.com/
 
 #include "stdafx.h"
 
